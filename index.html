@@ -20,14 +20,15 @@
         
         .subtitle-text {
             display: inline-block;
-            background-color: rgba(0, 0, 0, 0.7);
+            background-color: rgba(0, 0, 0, 0.75);
             color: white;
             font-size: 1.5rem;
-            padding: 4px 12px;
-            border-radius: 4px;
-            text-shadow: 1px 1px 2px black;
+            padding: 6px 16px;
+            border-radius: 6px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
             line-height: 1.4;
             font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+            transition: font-size 0.2s;
         }
         
         /* iframe 컨테이너 비율 유지 (16:9) */
@@ -46,6 +47,28 @@
             left: 0;
             width: 100%;
             height: 100%;
+        }
+
+        /* --- 전체화면(Fullscreen) 모드일 때의 스타일 --- */
+        .video-container:fullscreen {
+            padding-bottom: 0;
+            height: 100vh;
+            border-radius: 0;
+        }
+        .video-container:fullscreen .subtitle-text {
+            font-size: 2.5rem; /* 전체화면 시 자막 크기 키움 */
+            padding: 10px 24px;
+        }
+        
+        /* 사파리 등 Webkit 브라우저 호환성 */
+        .video-container:-webkit-full-screen {
+            padding-bottom: 0;
+            height: 100vh;
+            border-radius: 0;
+        }
+        .video-container:-webkit-full-screen .subtitle-text {
+            font-size: 2.5rem;
+            padding: 10px 24px;
         }
     </style>
 </head>
@@ -74,15 +97,26 @@
         </div>
 
         <!-- 플레이어 영역 -->
-        <div class="video-container shadow-inner">
+        <div id="video-container" class="video-container shadow-inner">
             <div id="player"></div>
             <div id="subtitle-overlay">
                 <span id="subtitle-display" class="subtitle-text" style="display: none;"></span>
             </div>
         </div>
         
-        <div class="mt-4 text-sm text-gray-500">
-            * 자막 파일(.srt)을 선택하고 영상을 재생하면 설정된 시간에 맞게 자막이 표시됩니다.
+        <!-- 하단 컨트롤 및 안내 문구 -->
+        <div class="mt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div class="text-sm text-gray-500 space-y-1">
+                <p>* 자막 파일(.srt)을 선택하고 영상을 재생하면 자막이 표시됩니다.</p>
+                <p class="text-red-500 font-medium">* 자막과 함께 보려면 유튜브 기본 버튼 대신 우측의 전체화면 버튼을 사용하세요.</p>
+            </div>
+            
+            <button onclick="toggleFullScreen()" class="flex items-center gap-2 px-5 py-2.5 bg-gray-800 text-white font-semibold rounded-lg hover:bg-gray-900 transition shrink-0 shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                </svg>
+                전체화면 모드
+            </button>
         </div>
     </div>
 
@@ -95,7 +129,6 @@
 
         // 1. YouTube IFrame API 준비 완료 시 호출됨
         function onYouTubeIframeAPIReady() {
-            // 초기 플레이어 생성 (기본 영상: 빈 화면 대신 임시 영상 ID 넣거나 비워둠)
             player = new YT.Player('player', {
                 height: '100%',
                 width: '100%',
@@ -103,7 +136,8 @@
                 playerVars: {
                     'playsinline': 1,
                     'controls': 1,
-                    'rel': 0
+                    'rel': 0,
+                    'fs': 0 // 유튜브 플레이어 내부의 기본 전체화면 버튼 숨김 (중요)
                 },
                 events: {
                     'onStateChange': onPlayerStateChange
@@ -123,7 +157,6 @@
             }
         }
 
-        // 유튜브 URL에서 Video ID 추출하는 함수
         function extractVideoID(url) {
             const regExp = /^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#&?]*).*/;
             const match = url.match(regExp);
@@ -141,15 +174,12 @@
                 subtitles = parseSRT(srtText);
                 alert('자막이 성공적으로 로드되었습니다. (' + subtitles.length + '줄)');
             };
-            reader.readAsText(file, 'utf-8'); // 한글 인코딩 깨지면 'euc-kr' 등 변경 가능
+            reader.readAsText(file, 'utf-8');
         });
 
-        // SRT 파싱 함수 (개선된 버전: 모든 운영체제의 줄바꿈을 지원)
+        // SRT 파싱 함수
         function parseSRT(data) {
-            // 1. 운영체제별 줄바꿈 문자(\r\n, \r)를 모두 \n으로 통일
             const normalizedData = data.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-            
-            // 2. 2개 이상의 연속된 빈 줄을 기준으로 자막 덩어리를 분리
             const blocks = normalizedData.trim().split(/\n{2,}/);
             const subs = [];
             
@@ -159,7 +189,6 @@
                     let timeLineIndex = -1;
                     let timeMatch = null;
                     
-                    // 3. 몇 번째 줄이 시간 정보를 담고 있는지 찾기
                     for (let i = 0; i < lines.length; i++) {
                         timeMatch = lines[i].match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/);
                         if (timeMatch) {
@@ -168,7 +197,6 @@
                         }
                     }
                     
-                    // 4. 시간 정보를 찾았다면, 그 다음 줄부터 모두 자막 텍스트로 취급
                     if (timeMatch && timeLineIndex !== -1) {
                         const text = lines.slice(timeLineIndex + 1).join('<br>');
                         subs.push({
@@ -182,7 +210,6 @@
             return subs;
         }
 
-        // 'HH:MM:SS,ms' 형식을 초 단위 숫자(float)로 변환
         function timeToSeconds(timeStr) {
             const parts = timeStr.replace(',', '.').split(':');
             return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
@@ -190,7 +217,6 @@
 
         // 4. 영상 상태 변경 시 자막 동기화
         function onPlayerStateChange(event) {
-            // 재생 중일 때 (YT.PlayerState.PLAYING == 1)
             if (event.data == YT.PlayerState.PLAYING) {
                 startSubtitleSync();
             } else {
@@ -199,7 +225,6 @@
         }
 
         function startSubtitleSync() {
-            // 0.1초마다 영상 시간 확인하여 자막 업데이트
             syncInterval = setInterval(() => {
                 const currentTime = player.getCurrentTime();
                 updateSubtitleDisplay(currentTime);
@@ -212,8 +237,6 @@
 
         function updateSubtitleDisplay(currentTime) {
             const displayElement = document.getElementById('subtitle-display');
-            
-            // 현재 시간에 맞는 자막 찾기
             const currentSub = subtitles.find(sub => currentTime >= sub.start && currentTime <= sub.end);
 
             if (currentSub) {
@@ -222,6 +245,28 @@
             } else {
                 displayElement.style.display = 'none';
                 displayElement.innerHTML = '';
+            }
+        }
+
+        // 5. 커스텀 전체화면 제어 함수
+        function toggleFullScreen() {
+            const container = document.getElementById('video-container');
+            
+            // 현재 전체화면이 아닌 경우 -> 전체화면 요청
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                if (container.requestFullscreen) {
+                    container.requestFullscreen();
+                } else if (container.webkitRequestFullscreen) { /* Safari 지원 */
+                    container.webkitRequestFullscreen();
+                }
+            } 
+            // 현재 전체화면인 경우 -> 전체화면 종료 (ESC 키로도 종료됨)
+            else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) { /* Safari 지원 */
+                    document.webkitExitFullscreen();
+                }
             }
         }
     </script>

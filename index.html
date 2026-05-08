@@ -144,20 +144,41 @@
             reader.readAsText(file, 'utf-8'); // 한글 인코딩 깨지면 'euc-kr' 등 변경 가능
         });
 
-        // SRT 파싱 함수 (텍스트를 [시작시간, 종료시간, 텍스트] 배열로 변환)
+        // SRT 파싱 함수 (개선된 버전: 모든 운영체제의 줄바꿈을 지원)
         function parseSRT(data) {
-            const regex = /(\d+)\s+(\d{2}:\d{2}:\d{2}[,.]\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}[,.]\d{3})\s+([\s\S]*?(?=\n{2,}|$))/g;
-            let match;
+            // 1. 운영체제별 줄바꿈 문자(\r\n, \r)를 모두 \n으로 통일
+            const normalizedData = data.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            
+            // 2. 2개 이상의 연속된 빈 줄을 기준으로 자막 덩어리를 분리
+            const blocks = normalizedData.trim().split(/\n{2,}/);
             const subs = [];
             
-            while ((match = regex.exec(data)) !== null) {
-                subs.push({
-                    start: timeToSeconds(match[2]),
-                    end: timeToSeconds(match[3]),
-                    // 줄바꿈 문자를 <br> 태그로 변환
-                    text: match[4].trim().replace(/\n/g, '<br>')
-                });
-            }
+            blocks.forEach(block => {
+                const lines = block.split('\n');
+                if (lines.length >= 3) {
+                    let timeLineIndex = -1;
+                    let timeMatch = null;
+                    
+                    // 3. 몇 번째 줄이 시간 정보를 담고 있는지 찾기
+                    for (let i = 0; i < lines.length; i++) {
+                        timeMatch = lines[i].match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/);
+                        if (timeMatch) {
+                            timeLineIndex = i;
+                            break;
+                        }
+                    }
+                    
+                    // 4. 시간 정보를 찾았다면, 그 다음 줄부터 모두 자막 텍스트로 취급
+                    if (timeMatch && timeLineIndex !== -1) {
+                        const text = lines.slice(timeLineIndex + 1).join('<br>');
+                        subs.push({
+                            start: timeToSeconds(timeMatch[1]),
+                            end: timeToSeconds(timeMatch[2]),
+                            text: text
+                        });
+                    }
+                }
+            });
             return subs;
         }
 

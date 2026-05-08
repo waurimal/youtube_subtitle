@@ -220,7 +220,7 @@
             return (match && match[7].length == 11) ? match[7] : false;
         }
 
-        // 3. 유튜브 영상 검색 기능 (Invidious API + Piped API 다중 우회)
+        // 3. 유튜브 HTML 직접 크롤링 방식 (CORS 우회 프록시 사용)
         async function searchYouTube() {
             const query = document.getElementById('search-query').value.trim();
             const resultsSection = document.getElementById('search-results-section');
@@ -236,144 +236,109 @@
             searchBtn.disabled = true;
             searchBtn.classList.add('opacity-75', 'cursor-wait');
             resultsSection.classList.remove('hidden');
-            resultsContainer.innerHTML = '<div class="w-full text-center py-6 text-gray-500 font-medium">여러 예비 서버를 탐색 중입니다... (최대 10초 소요)</div>';
+            resultsContainer.innerHTML = '<div class="w-full text-center py-6 text-gray-500 font-medium">유튜브 페이지 직접 분석 중... (크롤링 방식 적용)</div>';
 
-            // 1순위: Invidious API (Piped보다 대체로 안정적)
-            const invidiousInstances = [
-                'https://vid.puffyan.us',
-                'https://inv.tux.pizza',
-                'https://invidious.lunar.icu',
-                'https://invidious.weblibre.org',
-                'https://invidious.protokolla.fi'
-            ];
+            try {
+                // 막혀버린 오픈소스 API 대신, AllOrigins 무료 프록시를 통해 
+                // 브라우저에서 유튜브 검색 결과 페이지 자체를 텍스트로 가져옵니다.
+                const targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+                
+                const response = await fetch(proxyUrl);
+                if (!response.ok) throw new Error("프록시 네트워크 오류");
 
-            // 2순위: Piped API
-            const pipedInstances = [
-                'https://pipedapi.kavin.rocks',
-                'https://pipedapi.tokhmi.xyz',
-                'https://pipedapi.syncpundit.io'
-            ];
+                const data = await response.json();
+                const html = data.contents; // 유튜브 페이지의 순수 HTML
 
-            let finalVideos = [];
-            let success = false;
-
-            // Invidious API 먼저 시도
-            for (const instance of invidiousInstances) {
-                try {
-                    // API 요청 시 타임아웃 3초 설정
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 3000);
-                    
-                    const response = await fetch(`${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, { signal: controller.signal });
-                    clearTimeout(timeoutId);
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        finalVideos = data.filter(item => item.type === 'video').slice(0, 8).map(item => {
-                            let thumb = item.videoThumbnails && item.videoThumbnails.length > 0 ? item.videoThumbnails[0].url : 'https://via.placeholder.com/320x180?text=No+Image';
-                            if (thumb.startsWith('//')) thumb = 'https:' + thumb; // Invidious 특유의 URL 형태 대응
-                            return {
-                                videoId: item.videoId,
-                                title: item.title,
-                                thumbnail: thumb,
-                                channelTitle: item.author
-                            };
-                        });
-                        
-                        if (finalVideos.length > 0) {
-                            success = true;
-                            console.log(`✅ 연결 성공 (Invidious): ${instance}`);
-                            break;
-                        }
-                    }
-                } catch (error) {
-                    console.warn(`❌ [${instance}] 연결 실패`);
+                // 유튜브 HTML 내부에는 ytInitialData 라는 이름으로 화면에 뿌릴 JSON 데이터가 들어있습니다. 
+                // 이를 정규식으로 추출합니다.
+                const match = html.match(/ytInitialData\s*=\s*({.+?});/);
+                
+                if (!match || !match[1]) {
+                    throw new Error("유튜브 페이지 구조가 변경되어 파싱할 수 없습니다.");
                 }
-            }
 
-            // Invidious가 모두 실패하면 Piped API 시도
-            if (!success) {
-                for (const instance of pipedInstances) {
-                    try {
-                        const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 3000);
-                        
-                        const response = await fetch(`${instance}/search?q=${encodeURIComponent(query)}&filter=videos`, { signal: controller.signal });
-                        clearTimeout(timeoutId);
+                const ytData = JSON.parse(match[1]);
+                let finalVideos = [];
 
-                        if (response.ok) {
-                            const data = await response.json();
-                            finalVideos = data.items.filter(item => item.type === 'stream').slice(0, 8).map(item => {
-                                let vId = "";
-                                if (item.url && item.url.includes('?v=')) vId = item.url.split('?v=')[1];
-                                return {
-                                    videoId: vId,
-                                    title: item.title,
-                                    thumbnail: item.thumbnail || 'https://via.placeholder.com/320x180?text=No+Image',
-                                    channelTitle: item.uploaderName
-                                };
-                            }).filter(item => item.videoId !== "");
-                            
-                            if (finalVideos.length > 0) {
-                                success = true;
-                                console.log(`✅ 연결 성공 (Piped): ${instance}`);
-                                break;
+                // JSON 구조를 타고 들어가 영상 정보만 빼냅니다.
+                const contents = ytData.contents.twoColumnSearchResultsRenderer.primaryContents.sectionListRenderer.contents;
+                
+                for (const section of contents) {
+                    if (section.itemSectionRenderer && section.itemSectionRenderer.contents) {
+                        for (const item of section.itemSectionRenderer.contents) {
+                            // 비디오 항목만 골라내기
+                            if (item.videoRenderer) {
+                                const vr = item.videoRenderer;
+                                
+                                // 가장 큰 해상도의 썸네일 주소 가져오기
+                                let thumbUrl = 'https://via.placeholder.com/320x180?text=No+Image';
+                                if (vr.thumbnail && vr.thumbnail.thumbnails && vr.thumbnail.thumbnails.length > 0) {
+                                    thumbUrl = vr.thumbnail.thumbnails[vr.thumbnail.thumbnails.length - 1].url;
+                                }
+                                
+                                finalVideos.push({
+                                    videoId: vr.videoId,
+                                    title: vr.title?.runs?.[0]?.text || '제목 없음',
+                                    thumbnail: thumbUrl,
+                                    channelTitle: vr.ownerText?.runs?.[0]?.text || '채널명 없음'
+                                });
+                                
+                                if (finalVideos.length >= 8) break; // 8개만 표시
                             }
                         }
-                    } catch (error) {
-                        console.warn(`❌ [${instance}] 연결 실패`);
                     }
+                    if (finalVideos.length >= 8) break;
                 }
-            }
 
-            // 버튼 원상복구
-            searchBtn.disabled = false;
-            searchBtn.classList.remove('opacity-75', 'cursor-wait');
+                if (finalVideos.length === 0) {
+                    resultsContainer.innerHTML = '<div class="w-full text-center py-6 text-gray-500">검색 결과가 없습니다.</div>';
+                    return;
+                }
 
-            // 모든 서버가 실패했을 경우
-            if (!success) {
+                // 검색 결과 UI 생성
+                resultsContainer.innerHTML = '';
+                finalVideos.forEach(video => {
+                    const card = document.createElement('div');
+                    card.className = 'flex-shrink-0 w-60 bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md cursor-pointer transition snap-start group';
+                    
+                    // 카드 클릭 시 실행
+                    card.onclick = () => {
+                        document.getElementById('youtube-url').value = `https://www.youtube.com/watch?v=${video.videoId}`;
+                        loadVideo();
+                        document.getElementById('video-container').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    };
+
+                    card.innerHTML = `
+                        <div class="relative overflow-hidden">
+                            <img src="${video.thumbnail}" alt="${video.title}" class="w-full h-32 object-cover group-hover:scale-105 transition duration-300" onerror="this.src='https://via.placeholder.com/320x180?text=No+Image'">
+                            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition flex items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="text-white opacity-0 group-hover:opacity-100 transition" width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                            </div>
+                        </div>
+                        <div class="p-3">
+                            <h3 class="text-sm font-semibold text-gray-800 line-clamp-2" title="${video.title}">${video.title}</h3>
+                            <p class="text-xs text-gray-500 mt-1 truncate">${video.channelTitle}</p>
+                        </div>
+                    `;
+                    resultsContainer.appendChild(card);
+                });
+
+            } catch (error) {
+                console.error("Scraping error:", error);
+                // 만약 이 방법조차 실패한다면 정말 유튜브에서 모든 무료 접근을 막은 것입니다.
                 resultsContainer.innerHTML = `
                     <div class="w-full text-center py-5 text-red-500 bg-red-50 rounded-lg border border-red-100">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto mb-2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                        <p class="font-bold mb-1">현재 모든 무료 검색 서버가 응답하지 않습니다.</p>
-                        <p class="text-sm text-gray-600">무료 오픈소스 서버의 한계로 일시적인 차단이 발생했습니다.<br>번거로우시겠지만 유튜브에서 영상 링크를 직접 복사하여 <b>'직접 링크 입력'</b> 칸을 이용해 주세요.</p>
+                        <p class="font-bold mb-1">검색 서버가 응답하지 않습니다.</p>
+                        <p class="text-sm text-gray-600">유튜브의 보안 정책으로 인해 브라우저상에서 무료 검색이 완전히 차단되었습니다.<br>번거로우시더라도 유튜브 창에서 링크를 직접 복사하여 <b>'직접 링크 입력'</b>을 사용해 주세요.</p>
                     </div>
                 `;
-                return;
+            } finally {
+                // 버튼 원상복구
+                searchBtn.disabled = false;
+                searchBtn.classList.remove('opacity-75', 'cursor-wait');
             }
-
-            if (finalVideos.length === 0) {
-                resultsContainer.innerHTML = '<div class="w-full text-center py-6 text-gray-500">검색 결과가 없습니다.</div>';
-                return;
-            }
-
-            // 검색 결과 UI 생성
-            resultsContainer.innerHTML = '';
-            finalVideos.forEach(video => {
-                const card = document.createElement('div');
-                card.className = 'flex-shrink-0 w-60 bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md cursor-pointer transition snap-start group';
-                
-                // 카드 클릭 시 실행
-                card.onclick = () => {
-                    document.getElementById('youtube-url').value = `https://www.youtube.com/watch?v=${video.videoId}`;
-                    loadVideo();
-                    document.getElementById('video-container').scrollIntoView({ behavior: 'smooth', block: 'center' });
-                };
-
-                card.innerHTML = `
-                    <div class="relative overflow-hidden">
-                        <img src="${video.thumbnail}" alt="${video.title}" class="w-full h-32 object-cover group-hover:scale-105 transition duration-300" onerror="this.src='https://via.placeholder.com/320x180?text=No+Image'">
-                        <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="text-white opacity-0 group-hover:opacity-100 transition" width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                        </div>
-                    </div>
-                    <div class="p-3">
-                        <h3 class="text-sm font-semibold text-gray-800 line-clamp-2" title="${video.title}">${video.title}</h3>
-                        <p class="text-xs text-gray-500 mt-1 truncate">${video.channelTitle}</p>
-                    </div>
-                `;
-                resultsContainer.appendChild(card);
-            });
         }
 
         // 4. 자막 파일 처리

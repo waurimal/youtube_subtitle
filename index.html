@@ -122,7 +122,7 @@
                     <div class="flex gap-2">
                         <input type="text" id="search-query" onkeypress="if(event.key === 'Enter') searchYouTube()" placeholder="검색어를 입력하세요 (키 불필요)" 
                                class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-gray-800 outline-none transition">
-                        <button onclick="searchYouTube()" class="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition font-medium flex items-center gap-2 whitespace-nowrap">
+                        <button onclick="searchYouTube()" id="search-btn" class="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition font-medium flex items-center gap-2 whitespace-nowrap">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                             검색
                         </button>
@@ -220,108 +220,160 @@
             return (match && match[7].length == 11) ? match[7] : false;
         }
 
-        // 3. 유튜브 영상 검색 기능 (다중 오픈소스 Piped API 서버 활용 - 키 불필요)
+        // 3. 유튜브 영상 검색 기능 (Invidious API + Piped API 다중 우회)
         async function searchYouTube() {
             const query = document.getElementById('search-query').value.trim();
             const resultsSection = document.getElementById('search-results-section');
             const resultsContainer = document.getElementById('search-results');
+            const searchBtn = document.getElementById('search-btn');
 
             if (!query) {
                 alert("검색어를 입력해주세요.");
                 return;
             }
 
+            // UI 상태 변경
+            searchBtn.disabled = true;
+            searchBtn.classList.add('opacity-75', 'cursor-wait');
             resultsSection.classList.remove('hidden');
-            resultsContainer.innerHTML = '<div class="w-full text-center py-6 text-gray-500 font-medium">영상을 검색 중입니다... (서버 연결 중)</div>';
+            resultsContainer.innerHTML = '<div class="w-full text-center py-6 text-gray-500 font-medium">여러 예비 서버를 탐색 중입니다... (최대 10초 소요)</div>';
 
-            // 무료 우회 API (Piped) 예비 서버 목록 추가
-            const apiInstances = [
-                'https://pipedapi.kavin.rocks',      // 메인
-                'https://pipedapi.tokhmi.xyz',       // 예비 1
-                'https://pipedapi.syncpundit.io',    // 예비 2
-                'https://piped-api.garudalinux.org'  // 예비 3
+            // 1순위: Invidious API (Piped보다 대체로 안정적)
+            const invidiousInstances = [
+                'https://vid.puffyan.us',
+                'https://inv.tux.pizza',
+                'https://invidious.lunar.icu',
+                'https://invidious.weblibre.org',
+                'https://invidious.protokolla.fi'
             ];
 
-            let data = null;
+            // 2순위: Piped API
+            const pipedInstances = [
+                'https://pipedapi.kavin.rocks',
+                'https://pipedapi.tokhmi.xyz',
+                'https://pipedapi.syncpundit.io'
+            ];
 
-            // 정상 작동하는 서버를 찾을 때까지 반복 시도
-            for (const instance of apiInstances) {
+            let finalVideos = [];
+            let success = false;
+
+            // Invidious API 먼저 시도
+            for (const instance of invidiousInstances) {
                 try {
-                    const response = await fetch(`${instance}/search?q=${encodeURIComponent(query)}&filter=videos`);
+                    // API 요청 시 타임아웃 3초 설정
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 3000);
+                    
+                    const response = await fetch(`${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+
                     if (response.ok) {
-                        data = await response.json();
-                        console.log(`성공적으로 연결된 서버: ${instance}`);
-                        break; // 성공 시 반복문 즉시 종료
+                        const data = await response.json();
+                        finalVideos = data.filter(item => item.type === 'video').slice(0, 8).map(item => {
+                            let thumb = item.videoThumbnails && item.videoThumbnails.length > 0 ? item.videoThumbnails[0].url : 'https://via.placeholder.com/320x180?text=No+Image';
+                            if (thumb.startsWith('//')) thumb = 'https:' + thumb; // Invidious 특유의 URL 형태 대응
+                            return {
+                                videoId: item.videoId,
+                                title: item.title,
+                                thumbnail: thumb,
+                                channelTitle: item.author
+                            };
+                        });
+                        
+                        if (finalVideos.length > 0) {
+                            success = true;
+                            console.log(`✅ 연결 성공 (Invidious): ${instance}`);
+                            break;
+                        }
                     }
                 } catch (error) {
-                    console.warn(`[${instance}] 서버 연결 실패. 다음 예비 서버를 시도합니다.`);
+                    console.warn(`❌ [${instance}] 연결 실패`);
                 }
             }
 
-            try {
-                if (!data || data.error) {
-                    throw new Error("모든 서버 연결 실패");
-                }
+            // Invidious가 모두 실패하면 Piped API 시도
+            if (!success) {
+                for (const instance of pipedInstances) {
+                    try {
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 3000);
+                        
+                        const response = await fetch(`${instance}/search?q=${encodeURIComponent(query)}&filter=videos`, { signal: controller.signal });
+                        clearTimeout(timeoutId);
 
-                resultsContainer.innerHTML = '';
-                
-                // 검색된 항목 중 실제 영상(stream)인 것만 8개 추출
-                const videos = data.items.filter(item => item.type === 'stream').slice(0, 8);
-
-                if (videos.length === 0) {
-                    resultsContainer.innerHTML = '<div class="w-full text-center py-6 text-gray-500">검색 결과가 없습니다.</div>';
-                    return;
-                }
-
-                // 결과 항목 생성
-                videos.forEach(item => {
-                    // Piped API는 url을 '/watch?v=아이디' 형태로 줌
-                    let videoId = "";
-                    if (item.url && item.url.includes('?v=')) {
-                        videoId = item.url.split('?v=')[1];
-                    } else {
-                        return; // 올바르지 않은 데이터 건너뛰기
+                        if (response.ok) {
+                            const data = await response.json();
+                            finalVideos = data.items.filter(item => item.type === 'stream').slice(0, 8).map(item => {
+                                let vId = "";
+                                if (item.url && item.url.includes('?v=')) vId = item.url.split('?v=')[1];
+                                return {
+                                    videoId: vId,
+                                    title: item.title,
+                                    thumbnail: item.thumbnail || 'https://via.placeholder.com/320x180?text=No+Image',
+                                    channelTitle: item.uploaderName
+                                };
+                            }).filter(item => item.videoId !== "");
+                            
+                            if (finalVideos.length > 0) {
+                                success = true;
+                                console.log(`✅ 연결 성공 (Piped): ${instance}`);
+                                break;
+                            }
+                        }
+                    } catch (error) {
+                        console.warn(`❌ [${instance}] 연결 실패`);
                     }
+                }
+            }
 
-                    const title = item.title;
-                    const thumbnail = item.thumbnail;
-                    const channelTitle = item.uploaderName;
+            // 버튼 원상복구
+            searchBtn.disabled = false;
+            searchBtn.classList.remove('opacity-75', 'cursor-wait');
 
-                    // 결과 카드 UI
-                    const card = document.createElement('div');
-                    card.className = 'flex-shrink-0 w-60 bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md cursor-pointer transition snap-start group';
-                    
-                    // 카드 클릭 이벤트 (영상 로드)
-                    card.onclick = () => {
-                        document.getElementById('youtube-url').value = `https://www.youtube.com/watch?v=${videoId}`;
-                        loadVideo(); // 플레이어에 영상 띄우기
-                        document.getElementById('video-container').scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    };
-
-                    card.innerHTML = `
-                        <div class="relative overflow-hidden">
-                            <img src="${thumbnail}" alt="${title}" class="w-full h-32 object-cover group-hover:scale-105 transition duration-300" onerror="this.src='https://via.placeholder.com/320x180?text=No+Image'">
-                            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition flex items-center justify-center">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="text-white opacity-0 group-hover:opacity-100 transition" width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                            </div>
-                        </div>
-                        <div class="p-3">
-                            <h3 class="text-sm font-semibold text-gray-800 line-clamp-2" title="${title}">${title}</h3>
-                            <p class="text-xs text-gray-500 mt-1 truncate">${channelTitle}</p>
-                        </div>
-                    `;
-                    resultsContainer.appendChild(card);
-                });
-
-            } catch (error) {
-                console.error("Search error:", error);
+            // 모든 서버가 실패했을 경우
+            if (!success) {
                 resultsContainer.innerHTML = `
-                    <div class="w-full text-center py-4 text-red-500">
-                        <p class="font-bold mb-1">검색 서버와 연결할 수 없습니다.</p>
-                        <p class="text-sm text-gray-500">잠시 후 다시 시도하시거나, 직접 링크를 입력해 주세요.</p>
+                    <div class="w-full text-center py-5 text-red-500 bg-red-50 rounded-lg border border-red-100">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto mb-2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                        <p class="font-bold mb-1">현재 모든 무료 검색 서버가 응답하지 않습니다.</p>
+                        <p class="text-sm text-gray-600">무료 오픈소스 서버의 한계로 일시적인 차단이 발생했습니다.<br>번거로우시겠지만 유튜브에서 영상 링크를 직접 복사하여 <b>'직접 링크 입력'</b> 칸을 이용해 주세요.</p>
                     </div>
                 `;
+                return;
             }
+
+            if (finalVideos.length === 0) {
+                resultsContainer.innerHTML = '<div class="w-full text-center py-6 text-gray-500">검색 결과가 없습니다.</div>';
+                return;
+            }
+
+            // 검색 결과 UI 생성
+            resultsContainer.innerHTML = '';
+            finalVideos.forEach(video => {
+                const card = document.createElement('div');
+                card.className = 'flex-shrink-0 w-60 bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md cursor-pointer transition snap-start group';
+                
+                // 카드 클릭 시 실행
+                card.onclick = () => {
+                    document.getElementById('youtube-url').value = `https://www.youtube.com/watch?v=${video.videoId}`;
+                    loadVideo();
+                    document.getElementById('video-container').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                };
+
+                card.innerHTML = `
+                    <div class="relative overflow-hidden">
+                        <img src="${video.thumbnail}" alt="${video.title}" class="w-full h-32 object-cover group-hover:scale-105 transition duration-300" onerror="this.src='https://via.placeholder.com/320x180?text=No+Image'">
+                        <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="text-white opacity-0 group-hover:opacity-100 transition" width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                        </div>
+                    </div>
+                    <div class="p-3">
+                        <h3 class="text-sm font-semibold text-gray-800 line-clamp-2" title="${video.title}">${video.title}</h3>
+                        <p class="text-xs text-gray-500 mt-1 truncate">${video.channelTitle}</p>
+                    </div>
+                `;
+                resultsContainer.appendChild(card);
+            });
         }
 
         // 4. 자막 파일 처리
@@ -329,7 +381,6 @@
             const file = e.target.files[0];
             if (!file) return;
 
-            // 파일명 표시
             document.getElementById('file-name-display').textContent = file.name;
 
             const reader = new FileReader();

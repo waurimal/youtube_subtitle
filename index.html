@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>유튜브 커스텀 자막 플레이어</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- HLS.js (원본 스트림 재생용 라이브러리) -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         /* 자막이 표시될 오버레이 스타일 */
         #subtitle-overlay {
@@ -43,7 +41,7 @@
             border-radius: 0.5rem;
         }
         
-        .video-container iframe, .video-container video {
+        .video-container iframe {
             position: absolute;
             top: 0;
             left: 0;
@@ -89,15 +87,6 @@
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
             background: #94a3b8; 
         }
-        
-        /* AI 로딩 애니메이션 */
-        .pulse-text {
-            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .5; }
-        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-4 sm:p-6 font-sans">
@@ -121,15 +110,6 @@
                                class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition">
                         <button onclick="loadVideo()" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium whitespace-nowrap">불러오기</button>
                     </div>
-                    
-                    <!-- 🚀 신규: 광고 차단 모드 스위치 -->
-                    <label class="flex items-center gap-2 mt-3 cursor-pointer group w-max bg-red-50 px-3 py-1.5 rounded-md border border-red-100 hover:bg-red-100 transition">
-                        <input type="checkbox" id="clean-mode-toggle" class="w-4 h-4 text-red-600 rounded focus:ring-red-500 cursor-pointer">
-                        <span class="text-sm font-bold text-red-700 group-hover:text-red-800 flex items-center gap-1">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><line x1="9" y1="12" x2="15" y2="12"></line></svg>
-                            🚫 광고 100% 차단 모드 사용 (우회 스트림 추출)
-                        </span>
-                    </label>
                 </div>
 
                 <div class="relative flex items-center py-2">
@@ -141,7 +121,7 @@
                 <!-- 검색 방식 -->
                 <div class="space-y-2">
                     <div class="flex gap-2">
-                        <input type="text" id="search-query" onkeypress="if(event.key === 'Enter') searchYouTube()" placeholder="검색어를 입력하세요 (키 불필요)" 
+                        <input type="text" id="search-query" onkeypress="if(event.key === 'Enter') searchYouTube()" placeholder="검색어를 입력하세요" 
                                class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 focus:border-gray-800 outline-none transition">
                         <button onclick="searchYouTube()" id="search-btn" class="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition font-medium flex items-center gap-2 whitespace-nowrap">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
@@ -156,37 +136,11 @@
                 <h2 class="text-lg font-semibold text-gray-700 mb-4">2. 자막 준비</h2>
                 
                 <!-- PC 파일 업로드 -->
-                <div class="relative border-2 border-dashed border-gray-300 rounded-lg p-3 text-center hover:bg-gray-100 transition cursor-pointer mb-3" onclick="document.getElementById('subtitle-file').click()">
+                <div class="relative border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-100 transition cursor-pointer" onclick="document.getElementById('subtitle-file').click()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-gray-400 mb-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                     <p class="text-sm font-medium text-blue-600">내 PC에서 자막(.srt) 선택</p>
                     <p class="text-xs text-gray-500 mt-1" id="file-name-display">클릭하여 업로드</p>
                     <input type="file" id="subtitle-file" accept=".srt" class="hidden" onchange="handleSubtitleUpload(event)">
-                </div>
-
-                <div class="relative flex items-center py-1 mb-2">
-                    <div class="flex-grow border-t border-gray-200"></div>
-                    <span class="flex-shrink-0 mx-4 text-gray-400 text-xs font-medium">또는</span>
-                    <div class="flex-grow border-t border-gray-200"></div>
-                </div>
-
-                <!-- Gemini API 키 입력란 (GitHub 등 외부 호스팅용) -->
-                <div class="mb-3 space-y-1">
-                    <label class="block text-xs font-medium text-gray-600">Gemini API 키 (AI 번역용)</label>
-                    <input type="password" id="gemini-api-key" placeholder="AI 번역을 위해 구글 Gemini API 키를 입력하세요" 
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none transition">
-                    <p class="text-[10px] text-gray-500">※ 외부(GitHub 등)에서 사용하려면 <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-600 hover:underline">Google AI Studio</a>에서 무료로 키를 발급받아 입력하세요.</p>
-                </div>
-
-                <!-- AI 자막 번역 생성 버튼 -->
-                <button id="ai-translate-btn" onclick="extractAndTranslateCaptions()" class="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition shadow-md flex items-center justify-center gap-2 font-semibold">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path><path d="M12 2v12"></path></svg>
-                    ✨ AI 영어 자막 자동 번역 (전문가 수준)
-                </button>
-
-                <!-- AI 로딩 상태 표시 -->
-                <div id="ai-status-container" class="hidden mt-3 text-center">
-                    <div id="ai-status-text" class="text-xs font-bold text-purple-700 bg-purple-100 py-2 rounded-lg pulse-text">
-                        대기 중...
-                    </div>
                 </div>
             </div>
         </div>
@@ -206,8 +160,6 @@
         <div id="video-container" class="video-container shadow-inner">
             <!-- 유튜브 공식 플레이어 -->
             <div id="player"></div>
-            <!-- 광고 차단용 커스텀 HTML5 플레이어 -->
-            <video id="html5-player" controls playsinline style="display: none;"></video>
             
             <div id="subtitle-overlay">
                 <span id="subtitle-display" class="subtitle-text" style="display: none;"></span>
@@ -217,7 +169,7 @@
         <!-- 하단 컨트롤 및 안내 문구 -->
         <div class="mt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div class="text-sm text-gray-500 space-y-1">
-                <p>* 자막 파일(.srt)을 선택하거나 AI 번역을 완료하고 영상을 재생하면 자막이 표시됩니다.</p>
+                <p>* 자막 파일(.srt)을 선택하고 영상을 재생하면 자막이 표시됩니다.</p>
                 <p class="text-red-500 font-medium">* 자막과 함께 보려면 유튜브 기본 버튼 대신 우측의 전체화면 버튼을 사용하세요.</p>
             </div>
             
@@ -234,11 +186,8 @@
     <script src="https://www.youtube.com/iframe_api"></script>
     <script>
         let player;
-        let html5Player = document.getElementById('html5-player');
-        let hlsInstance = null;
         let subtitles = [];
         let syncInterval;
-        let currentLoadedVideoId = null;
 
         // 1. YouTube IFrame API 준비
         function onYouTubeIframeAPIReady() {
@@ -250,7 +199,7 @@
                     'playsinline': 1,
                     'controls': 1,
                     'rel': 0,
-                    'fs': 0
+                    'fs': 0 // 유튜브 플레이어 내부의 기본 전체화면 버튼 숨김
                 },
                 events: {
                     'onStateChange': onPlayerStateChange
@@ -258,28 +207,18 @@
             });
         }
 
-        // 2. 영상 로드하기 (분기 처리)
+        // 2. 영상 로드하기
         function loadVideo() {
             const url = document.getElementById('youtube-url').value;
             const videoId = extractVideoID(url);
-            const useCleanMode = document.getElementById('clean-mode-toggle').checked;
             
-            if (!videoId) {
-                alert('올바른 유튜브 링크를 입력해주세요.');
-                return;
-            }
-            
-            currentLoadedVideoId = videoId;
-            subtitles = [];
-            document.getElementById('subtitle-display').style.display = 'none';
-            document.getElementById('file-name-display').textContent = '클릭하여 업로드';
-
-            // 광고 차단 모드 여부에 따라 플레이어 전환
-            if (useCleanMode) {
-                loadCleanStream(videoId);
-            } else {
-                switchToYouTubePlayer();
+            if (videoId) {
                 player.loadVideoById(videoId);
+                subtitles = []; // 영상 변경 시 기존 자막 초기화
+                document.getElementById('subtitle-display').style.display = 'none';
+                document.getElementById('file-name-display').textContent = '클릭하여 업로드';
+            } else {
+                alert('올바른 유튜브 링크를 입력해주세요.');
             }
         }
 
@@ -290,226 +229,7 @@
         }
 
         // ==========================================
-        // 🚀 신규 추가: 광고 완전 차단 원본 스트림 해킹 로직
-        // ==========================================
-        function switchToYouTubePlayer() {
-            document.getElementById('player').style.display = 'block';
-            html5Player.style.display = 'none';
-            if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-            html5Player.pause();
-        }
-
-        function switchToHTML5Player() {
-            document.getElementById('player').style.display = 'none';
-            html5Player.style.display = 'block';
-            if (player && player.pauseVideo) player.pauseVideo();
-        }
-
-        async function loadCleanStream(videoId) {
-            // 원본 스트림을 제공해줄 Piped 우회 서버 목록
-            const pipedInstances = [
-                'https://pipedapi.kavin.rocks',
-                'https://pipedapi.tokhmi.xyz',
-                'https://pipedapi.syncpundit.io',
-                'https://api.piped.projectsegfau.lt'
-            ];
-            let streamData = null;
-
-            // 로딩 상태 표시 (간단히 버튼 텍스트 변경)
-            const origUrl = document.getElementById('youtube-url').value;
-            document.getElementById('youtube-url').value = "원본 스트림 데이터 추출 중...";
-
-            for (const instance of pipedInstances) {
-                try {
-                    const response = await fetch(`${instance}/streams/${videoId}`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.hls) { // HLS 플레이리스트를 찾음
-                            streamData = data;
-                            break;
-                        }
-                    }
-                } catch(e) { console.warn("스트림 추출 서버 실패:", instance); }
-            }
-
-            document.getElementById('youtube-url').value = origUrl;
-
-            if (!streamData) {
-                alert("현재 우회 서버들이 혼잡하여 원본 영상을 추출하지 못했습니다.\n광고 차단 체크를 해제하고 일반 모드로 재생해 주세요.");
-                document.getElementById('clean-mode-toggle').checked = false;
-                switchToYouTubePlayer();
-                player.loadVideoById(videoId);
-                return;
-            }
-
-            // HTML5 커스텀 플레이어로 화면 전환
-            switchToHTML5Player();
-
-            // HLS.js 라이브러리를 사용해 가져온 스트림 데이터를 웹 플레이어에 연결
-            if (Hls.isSupported()) {
-                if (hlsInstance) { hlsInstance.destroy(); }
-                hlsInstance = new Hls();
-                hlsInstance.loadSource(streamData.hls);
-                hlsInstance.attachMedia(html5Player);
-                hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                    html5Player.play();
-                });
-            } else if (html5Player.canPlayType('application/vnd.apple.mpegurl')) {
-                // 사파리 등 네이티브 HLS 지원 브라우저
-                html5Player.src = streamData.hls;
-                html5Player.addEventListener('loadedmetadata', function() {
-                    html5Player.play();
-                });
-            }
-        }
-        // ==========================================
-
-
-        // ==========================================
-        // AI 자막 추출 및 번역 기능 (유지)
-        // ==========================================
-        async function extractAndTranslateCaptions() {
-            if (!currentLoadedVideoId) {
-                alert("번역할 영상을 먼저 불러와 주세요!\n(URL 입력 후 '불러오기' 버튼 클릭 또는 검색 결과 선택)");
-                return;
-            }
-
-            const btn = document.getElementById('ai-translate-btn');
-            const statusContainer = document.getElementById('ai-status-container');
-            const statusText = document.getElementById('ai-status-text');
-
-            btn.disabled = true;
-            btn.classList.add('opacity-50', 'cursor-not-allowed');
-            statusContainer.classList.remove('hidden');
-
-            try {
-                statusText.textContent = "1/3: 유튜브에서 원본 영어 자막 탐색 중...";
-                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + currentLoadedVideoId)}`;
-                
-                const response = await fetch(proxyUrl);
-                if (!response.ok) throw new Error("프록시 네트워크 오류");
-                const data = await response.json();
-                const html = data.contents;
-
-                const match = html.match(/"captionTracks":(\[.+?\])(?=,")/);
-                if (!match) throw new Error("이 영상에는 추출 가능한 자막이 제공되지 않습니다.");
-
-                const tracks = JSON.parse(match[1]);
-                let enTrack = tracks.find(t => t.languageCode === 'en' && !t.kind);
-                if (!enTrack) enTrack = tracks.find(t => t.languageCode.startsWith('en'));
-                if (!enTrack) throw new Error("이 영상에는 영어 자막이 포함되어 있지 않습니다.");
-
-                statusText.textContent = "2/3: 자막 데이터를 텍스트로 변환하는 중...";
-                const xmlRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(enTrack.baseUrl)}`);
-                const xmlData = await xmlRes.json();
-
-                const parser = new DOMParser();
-                const xmlDoc = parser.parseFromString(xmlData.contents, "text/xml");
-                const textNodes = xmlDoc.getElementsByTagName("text");
-
-                let tempSubs = [];
-                let rawTexts = [];
-
-                for (let i = 0; i < textNodes.length; i++) {
-                    const node = textNodes[i];
-                    const start = parseFloat(node.getAttribute("start"));
-                    const dur = parseFloat(node.getAttribute("dur") || "2.0");
-                    const text = node.textContent.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
-                    
-                    if (text.trim().length > 0) {
-                        tempSubs.push({ start, end: start + dur, text });
-                        rawTexts.push(text);
-                    }
-                }
-
-                if (rawTexts.length === 0) throw new Error("자막 내용이 비어있습니다.");
-
-                statusText.textContent = `3/3: Gemini AI가 맥락을 분석하여 번역 중... (총 ${rawTexts.length}줄)`;
-                const translatedTexts = await translateTextsWithGemini(rawTexts, statusText);
-
-                subtitles = tempSubs.map((sub, index) => {
-                    return {
-                        start: sub.start,
-                        end: sub.end,
-                        text: translatedTexts[index] || sub.text
-                    };
-                });
-
-                document.getElementById('file-name-display').textContent = `✨ AI 번역 완료 (${subtitles.length}줄)`;
-                alert("전문가 수준의 한글 번역이 완료되었습니다!\n영상을 재생하시면 즉시 확인하실 수 있습니다.");
-
-            } catch (error) {
-                console.error(error);
-                alert("AI 번역 실패: " + error.message);
-            } finally {
-                btn.disabled = false;
-                btn.classList.remove('opacity-50', 'cursor-not-allowed');
-                statusContainer.classList.add('hidden');
-            }
-        }
-
-        async function translateTextsWithGemini(texts, statusTextElement) {
-            const inputKey = document.getElementById('gemini-api-key').value.trim();
-            const apiKey = inputKey || ""; 
-            
-            if (!apiKey && window.location.hostname !== "localhost" && !window.location.hostname.includes("google")) {
-                // throw new Error("Gemini API 키가 입력되지 않았습니다.");
-            }
-
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-            const retries = 5;
-            const delays = [1000, 2000, 4000, 8000, 16000];
-            const batchSize = 100;
-            let finalTranslations = [];
-
-            for (let b = 0; b < texts.length; b += batchSize) {
-                const batch = texts.slice(b, b + batchSize);
-                const progress = Math.min(100, Math.round(((b + batchSize) / texts.length) * 100));
-                statusTextElement.textContent = `3/3: AI 번역 진행 중... (${progress}%)`;
-
-                const payload = {
-                    contents: [{
-                        parts: [{
-                            text: `당신은 세계 최고 수준의 전문 영상 번역가입니다. 전달받은 영어 자막 배열을 자연스럽고 매끄러운 한국어로 번역하세요.\n\n지시사항:\n1. 단순 직역이 아닌 문맥에 맞는 자연스러운 한국어로 의역할 것.\n2. 영상 자막의 특성을 살려 간결하게 표현할 것.\n3. 반환하는 배열의 길이는 반드시 원본 배열과 정확히 일치해야 함.\n\n원본 자막 배열:\n${JSON.stringify(batch)}`
-                        }]
-                    }],
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        responseSchema: { type: "ARRAY", items: { type: "STRING" } }
-                    }
-                };
-
-                let success = false;
-                for (let i = 0; i < retries; i++) {
-                    try {
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-
-                        if (!response.ok) throw new Error("API 요청 실패");
-                        const result = await response.json();
-                        const textOutput = result.candidates?.[0]?.content?.parts?.[0]?.text;
-                        
-                        if (textOutput) {
-                            const parsedArray = JSON.parse(textOutput);
-                            finalTranslations = finalTranslations.concat(parsedArray);
-                            success = true;
-                            break;
-                        } else { throw new Error("결과 값 없음"); }
-                    } catch (error) {
-                        if (i === retries - 1) throw new Error("AI 서버 연결 실패");
-                        await new Promise(resolve => setTimeout(resolve, delays[i]));
-                    }
-                }
-                if (!success) finalTranslations = finalTranslations.concat(batch); 
-            }
-            return finalTranslations;
-        }
-
-        // ==========================================
-        // 다중 서버 병렬 스웜(Swarm) 검색 기법 (유지)
+        // 다중 서버 병렬 스웜(Swarm) 검색 기법
         // ==========================================
         async function searchYouTube() {
             const query = document.getElementById('search-query').value.trim();
@@ -702,13 +422,6 @@
             return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
         }
 
-        // 🚀 신규: HTML5 플레이어 이벤트 리스너 연동
-        html5Player.addEventListener('play', startSubtitleSync);
-        html5Player.addEventListener('pause', stopSubtitleSync);
-        html5Player.addEventListener('seeking', () => {
-            if(document.getElementById('clean-mode-toggle').checked) updateSubtitleDisplay(html5Player.currentTime);
-        });
-
         function onPlayerStateChange(event) {
             if (event.data == YT.PlayerState.PLAYING) {
                 startSubtitleSync();
@@ -719,15 +432,10 @@
 
         function startSubtitleSync() {
             syncInterval = setInterval(() => {
-                const useCleanMode = document.getElementById('clean-mode-toggle').checked;
-                // 현재 활성화된 플레이어가 무엇인지에 따라 시간 가져오는 곳이 다름
                 let currentTime = 0;
-                if (useCleanMode && !html5Player.paused) {
-                    currentTime = html5Player.currentTime;
-                } else if (!useCleanMode && player && player.getCurrentTime) {
+                if (player && player.getCurrentTime) {
                     currentTime = player.getCurrentTime();
                 }
-                
                 updateSubtitleDisplay(currentTime);
             }, 100);
         }
